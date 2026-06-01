@@ -2,6 +2,8 @@
 
 A small research and educational project for visualizing how Transformer weight matrices evolve during training.
 
+We currently have very limited tools for observing the internal dynamics of neural network training. Loss curves tell us whether optimization works, but they reveal little about how weight matrices reorganize internally. This project is a small observatory for tracking such internal changes through spectral and geometric diagnostics.
+
 The notebook trains a tiny Qwen-style language model on WikiText-2 using a simple word-level tokenizer and records matrix diagnostics throughout training.
 
 The main goal is to demonstrate that different optimizers can reach similar losses while producing significantly different internal matrix geometries.
