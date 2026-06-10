@@ -1,439 +1,519 @@
-# Transformer Spectral Observatory   AdamW vs  Muon  Toward  Loss Curves
+# Transformer Spectral Observatory: AdamW vs Muon
 
-A compact educational laboratory for observing **training dynamics inside Transformer weight matrices**.
+**A small, reproducible notebook lab for comparing how AdamW and Muon shape Transformer weight-matrix spectra during training.**
 
-The accompanying Jupyter notebook trains a tiny Qwen-style causal language model on WikiText-2 with a simple word-level tokenizer and compares **AdamW** with **Muon**. During training it logs train/validation loss and intra-layer matrix diagnostics for attention and FFN projection matrices.
+This repository trains a tiny Qwen-style decoder-only language model on WikiText-2 and logs both ordinary loss curves and matrix-level diagnostics for attention and MLP projection weights.
 
+The purpose is simple:
+
+> Same tiny Transformer, same data, same training loop, different optimizer.  
+> Compare not only validation loss, but also the spectra, ranks, subspaces, gradients, and weight-space trajectories of the learned matrices.
+
+This is an educational and diagnostic experiment. It is not a benchmark, not a proof that Muon is better than AdamW, and not a complete theory of Transformer training dynamics.
+
+---
+
+## What this is
+
+This repository is a **spectral training-dynamics observatory**.
+
+It is useful for asking questions such as:
+
+- Do AdamW and Muon reach similar validation loss through different matrix trajectories?
+- Does one optimizer concentrate matrix energy into fewer singular directions?
+- Does one produce broader stable-rank behavior?
+- Do dominant singular subspaces drift differently across checkpoints?
+- Are gradients aligned with already-dominant spectral directions, or do they push into weaker directions?
+- Are weight updates smooth, oscillatory, or abrupt under different optimizers?
+
+The project is designed to make those questions easy to inspect in a small controlled setting.
+
+---
+
+## What this is not
+
+This repository does **not** claim that:
+
+- Muon is universally better than AdamW,
+- spectral diagnostics predict downstream quality,
+- stable rank is a direct measure of intelligence or representation quality,
+- top singular vectors are necessarily features,
+- the gradient covariance proxy is a full Fisher matrix,
+- small WikiText-2 runs generalize to frontier-scale LLM training,
+- word-level tokenization is competitive with modern tokenizer pipelines.
+
+The outputs are diagnostic signals.
+
+They should be interpreted as exploratory measurements, not final conclusions.
+
+---
 
 ## Core idea
 
-Most training dashboards show only scalar metrics:
+Most training dashboards show:
 
-- train loss
-- validation loss
-- perplexity
+- training loss,
+- validation loss,
+- perplexity.
 
-Those tell us whether optimization works, but not **how the network reorganizes internally**.
+Those metrics tell us whether optimization is working, but they do not tell us how the internal matrices are changing.
 
-This project treats each Transformer matrix as a geometric object evolving through training:
+This notebook treats each Transformer projection matrix as a linear operator evolving through training:
 
-```text
-W_0, W_1, W_2, ..., W_t
+```math
+W_0, W_1, W_2, \ldots, W_t
 ```
 
-The main thesis is:
+At diagnostic checkpoints, it measures how that operator changes.
+
+The main practical thesis is:
 
 > Similar validation loss does not imply similar internal matrix geometry.
 
-AdamW and Muon may reach similar losses while producing different spectra, effective ranks, subspace rotations, gradient anisotropy, and weight-space trajectories.
+AdamW and Muon may produce similar external curves while inducing different spectra, effective ranks, gradient anisotropy, subspace drift, and weight-space trajectories.
 
-## Diagnostics included
+---
 
-### Spectral diagnostics
+## Why AdamW vs Muon?
 
-For each tracked weight matrix:
+AdamW is the standard baseline optimizer for Transformer training.
 
-```math
-W = U \Sigma V^T
+Muon is a matrix-aware optimizer that applies orthogonalized momentum-style updates to matrix parameters. This makes it especially interesting for diagnostics based on singular values, rank, and subspace motion.
+
+This repository does not try to settle optimizer performance.
+
+It asks a narrower question:
+
+> If AdamW and Muon train the same tiny Transformer, do their learned matrices look different along spectral and trajectory diagnostics?
+
+That is a measurement question, not a leaderboard claim.
+
+---
+
+## Repository contents
+
+Current files include:
+
+```text
+README.md
+loss_curves_adamw_vs_muon.csv
+matrix_diagnostics_adamw_vs_muon.csv
+tiny_qwen_wikitext2_matrix_diagnostics_adamw_muon_enhanced_dynamics_fixed.ipynb
+tiny_qwen_wikitext2_matrix_diagnostics_adamw_muon_print_titles_fixed.ipynb
 ```
 
-The notebook tracks:
-
-- Frobenius norm
-- spectral norm
-- stable rank
-- top-k energy ratio
-- singular value curves
-- row/column norm outlier ratios
-
-### Stable rank
-
-```math
-\mathrm{srank}(W)=\frac{\|W\|_F^2}{\|W\|_2^2}
-```
-
-This is a soft rank estimate. Lower stable rank means the matrix energy is concentrated into fewer dominant directions.
-
-### Subspace alignment and drift
-
-The notebook compares dominant singular subspaces between checkpoints:
-
-```math
-V_k^{(t)} \quad \text{vs.} \quad V_k^{(t+\Delta)}
-```
-
-It records overlap and drift. This shows whether a layer keeps refining the same dominant directions or rotates into new ones.
-
-### Gradient projection ratio
-
-The notebook measures whether the current gradient aligns with the dominant singular directions of the weight matrix:
-
-```math
-\langle \nabla_W L, u_i v_i^T \rangle
-```
-
-High projection means updates are concentrated in already-dominant directions. Low projection means updates are distributed across weaker or emerging directions.
-
-### Gradient covariance / Fisher-proxy diagnostics
-
-The true Fisher Information Matrix is:
-
-```math
-F = \mathbb{E}\left[\nabla_\theta \log p_\theta(y|x)\nabla_\theta \log p_\theta(y|x)^T\right]
-```
-
-Computing the full empirical Fisher is expensive. The notebook therefore uses a cheap layer-level proxy based on the singular values of the current matrix gradient `G`:
-
-```math
-GG^T \quad \text{and} \quad G^T G
-```
-
-It logs:
-
-- trace proxy
-- largest eigenvalue proxy
-- effective rank proxy
-- top-k gradient/Fisher-proxy energy
-
-This is not a full empirical Fisher, but it is useful for observing whether the current update signal is isotropic or concentrated.
-
-### Weight velocity and acceleration
-
-At diagnostic checkpoints:
-
-```math
-v_t = W_t - W_{t-\Delta}
-```
-
-```math
-a_t = v_t - v_{t-\Delta}
-```
-
-These finite-difference quantities show how the optimizer moves through weight space.
-
-The notebook logs:
-
-- velocity Frobenius norm
-- velocity spectral norm
-- acceleration Frobenius norm
-- relative acceleration
-- velocity cosine
-
-## Why this matters
-
-Two optimizers can produce similar validation loss while creating very different internal structures:
-
-- different spectral concentration
-- different effective dimensionality
-- different dominant subspaces
-- different gradient anisotropy
-- different trajectory smoothness
-
-This repository is meant as a small microscope for those differences.
-
-## Files
-
-Expected outputs from the notebook:
+Expected generated outputs:
 
 ```text
 loss_curves_adamw_vs_muon.csv
 matrix_diagnostics_adamw_vs_muon.csv
 ```
 
-## Requirements
+---
 
-```bash
-pip install torch datasets transformers matplotlib pandas numpy tqdm
-```
+## Model and dataset
 
-## Run
+The notebook uses a compact Qwen-style causal language model.
 
-```bash
-jupyter notebook tiny_qwen_wikitext2_matrix_diagnostics_adamw_muon_enhanced_dynamics.ipynb
-```
+Typical design choices:
 
-Run all cells. You can change:
+- small decoder-only Transformer,
+- WikiText-2 dataset,
+- simple word-level tokenizer,
+- attention and MLP projection matrices tracked,
+- dense diagnostic logging over training.
 
-- optimizer
-- learning rate
-- batch size
-- model size
-- diagnostic interval
-- tracked matrix patterns
-- top-k singular directions
+The setup is intentionally small.
 
-## References
-
-- Amari, S. Natural gradient learning and Fisher information geometry.
-- Martens, J. and Grosse, R. (2015). *Optimizing Neural Networks with Kronecker-factored Approximate Curvature*.
-- Raghu, M. et al. (2017). *SVCCA: Singular Vector Canonical Correlation Analysis for Deep Learning Dynamics and Interpretability*.
-- Morcos, A. et al. (2018). *Insights on Representational Similarity in Neural Networks with Canonical Correlation*.
-- Kornblith, S. et al. (2019). *Similarity of Neural Network Representations Revisited*.
-- Martin, C. H. and Mahoney, M. W. (2019/2021). *Traditional and Heavy-Tailed Self-Regularization in Neural Network Models* / *Implicit Self-Regularization in Deep Neural Networks*.
-
-## License
-
-MIT
-
+The goal is not to train a strong language model. The goal is to make internal optimizer-induced matrix dynamics visible and cheap to reproduce.
 
 ---
 
-# README Addendum: Extended Training-Dynamics Diagnostics
+## Diagnostics
 
-This addendum expands the motivation and interpretation of the extended diagnostics used in the notebook. It can be appended to the main `README.md` under a section such as **Research Notes** or **Extended Diagnostics**.
+### 1. Loss curves
 
----
+The notebook logs:
 
-## Why look beyond loss curves?
+- training loss,
+- validation loss,
+- approximate perplexity.
 
-Training and validation loss are necessary but incomplete observables. They tell us whether the model is improving on the language-modeling objective, but they do not reveal *how* the internal parameters reorganize during optimization.
+These provide the external optimization baseline.
 
-For a Transformer layer, a projection matrix is not just a table of scalar weights. It is a linear operator:
-
-```math
-W: \mathbb{R}^{d_{in}} \rightarrow \mathbb{R}^{d_{out}}
-```
-
-During training, this operator changes continuously:
-
-```math
-W_0, W_1, W_2, \ldots, W_t
-```
-
-The central idea of this project is that two optimizers may produce similar loss curves while following very different trajectories in weight space. Therefore, we track the geometry and dynamics of matrices directly.
+The spectral diagnostics should always be read alongside loss curves. Geometry without loss is just expensive numerology.
 
 ---
 
-## 1. Spectral dynamics
+### 2. Singular value spectra
 
-The singular value decomposition
+For each tracked matrix:
 
 ```math
-W = U \Sigma V^T
+W = U \Sigma V^\top
 ```
 
-separates a weight matrix into input directions, output directions, and amplification strengths. The singular values reveal how much the matrix stretches different directions in representation space.
+the notebook records singular-value information.
 
-The notebook tracks:
+Tracked quantities include:
 
-- Frobenius norm
-- spectral norm
-- stable rank
-- top-k spectral energy
-- singular-value trajectories
+- Frobenius norm,
+- spectral norm,
+- top singular values,
+- singular-value curves,
+- top-k energy ratio,
+- row and column norm outlier ratios.
 
-These metrics answer questions such as:
-
-- Is the matrix energy becoming more concentrated?
-- Is the layer becoming effectively low-rank?
-- Are a few dominant directions taking over?
-- Does one optimizer create a more anisotropic operator than another?
-
-This is related to work on empirical spectral densities and heavy-tailed self-regularization in neural-network weight matrices, where trained networks often develop non-random spectral structure rather than remaining close to random matrix baselines.
+These diagnostics show whether matrix energy is broad or concentrated.
 
 ---
 
-## 2. Stable rank as effective dimensionality
+### 3. Stable rank
 
-The stable rank is defined as:
+Stable rank is defined as:
 
 ```math
-\mathrm{srank}(W) = \frac{\|W\|_F^2}{\|W\|_2^2}
+\mathrm{srank}(W) =
+\frac{\|W\|_F^2}{\|W\|_2^2}
 ```
-
-Unlike the algebraic rank, stable rank is continuous and sensitive to spectral concentration. If one singular value dominates, stable rank decreases. If energy is distributed across many directions, stable rank is larger.
-
-In this notebook, stable rank is used as a proxy for the effective dimensionality of a learned projection.
 
 Interpretation:
 
-- decreasing stable rank: energy concentrates into fewer dominant directions
-- increasing stable rank: energy spreads across more directions
-- optimizer differences in stable rank: different implicit geometric biases
+- lower stable rank means energy is concentrated in fewer dominant directions,
+- higher stable rank means energy is distributed across more directions.
+
+In this repository, stable rank is used as a soft spectral-spread proxy.
+
+It is not a quality metric.
 
 ---
 
-## 3. Subspace drift and alignment
+### 4. Top-k spectral energy
 
-The top singular vectors define dominant input and output subspaces:
+Top-k spectral energy measures how much of the matrix energy is captured by the leading singular directions:
 
 ```math
-V_k^{(t)}, \quad U_k^{(t)}
+E_k =
+\frac{\sum_{i=1}^{k} \sigma_i^2}
+{\sum_i \sigma_i^2}
 ```
 
-Comparing these subspaces across checkpoints tells us whether training is refining the same directions or discovering new ones.
+High top-k energy suggests spectral concentration.
 
-The notebook tracks a subspace-overlap score between checkpoints. High overlap means the dominant subspace is stable. Low overlap means the layer is rotating into different directions.
+Lower top-k energy suggests broader spectral support.
 
-This is related in spirit to SVCCA and CKA-style representation-similarity methods, but here the comparison is applied directly to weight-matrix subspaces rather than activations.
-
-Interpretation:
-
-- high alignment: stable dominant directions
-- low alignment: rapid representational reorganization
-- optimizer-specific alignment: different path geometry through weight space
+This is useful for comparing whether AdamW or Muon produces more concentrated projection matrices in the tested setup.
 
 ---
 
-## 4. Gradient projection onto spectral directions
+### 5. Subspace alignment and drift
 
-The gradient matrix
+The notebook compares dominant singular subspaces across checkpoints.
+
+For example:
+
+```math
+V_k^{(t)}
+\quad \text{vs.} \quad
+V_k^{(t+\Delta)}
+```
+
+A high overlap score means the dominant subspace is relatively stable.
+
+A low overlap score means the dominant subspace has rotated or changed.
+
+This is a weight-space diagnostic. It should not be overinterpreted as a direct representation-similarity measure.
+
+---
+
+### 6. Gradient projection ratio
+
+The current gradient matrix is:
 
 ```math
 G_t = \nabla_W L_t
 ```
 
-can be decomposed relative to the current singular directions of `W`. The notebook measures how much of the gradient lies in the dominant rank-k spectral subspace:
+The notebook measures how much of the gradient lies in the current dominant spectral directions of the weight matrix.
+
+Conceptually:
 
 ```math
 \frac{\|P_k(G_t)\|_F^2}{\|G_t\|_F^2}
 ```
 
-where `P_k` is the projection onto the span of the leading singular directions.
-
-This answers:
-
-- Is the optimizer reinforcing already-dominant directions?
-- Is the gradient creating new directions?
-- Are updates spectrally concentrated or diffuse?
-
-A high projection ratio means updates are mostly aligned with already-important directions. A low ratio means the update signal is spread into weaker or emerging directions.
-
----
-
-## 5. Fisher / gradient-covariance proxy
-
-The Fisher Information Matrix for a likelihood model is:
-
-```math
-F = \mathbb{E}\left[
-\nabla_\theta \log p_\theta(y|x)
-\nabla_\theta \log p_\theta(y|x)^T
-\right]
-```
-
-For language models, this object is natural because the model explicitly represents conditional token distributions:
-
-```math
-p_\theta(x_{t+1} \mid x_{\leq t})
-```
-
-The Fisher measures how sensitive the model distribution is to parameter changes. It is therefore not merely a local curvature diagnostic; it is a geometry induced by the predictive distribution.
-
-The full Fisher is too large to compute for even modest neural networks. The notebook therefore uses a cheap layer-level proxy based on the current gradient matrix. For a matrix gradient `G`, it examines spectral quantities related to:
-
-```math
-GG^T \quad \text{or} \quad G^TG
-```
-
-This is not a full empirical Fisher. It is a tractable diagnostic for gradient anisotropy and update concentration.
-
-Tracked quantities include:
-
-- gradient/Fisher-proxy trace
-- largest eigenvalue proxy
-- effective rank proxy
-- top-k energy ratio
+where \(P_k\) projects the gradient onto the top-k spectral subspace of \(W\).
 
 Interpretation:
 
-- high top eigenvalue: update signal concentrated in one dominant direction
-- high effective rank: update signal distributed across many directions
-- optimizer differences: different curvature/geometry interaction
+- high projection ratio: updates mostly reinforce already-dominant directions,
+- low projection ratio: updates are more distributed or push into weaker directions.
 
-This connects to natural-gradient and K-FAC literature, where Fisher structure is used to define more geometry-aware optimization methods.
+This can reveal whether the optimizer is refining the current dominant matrix structure or introducing new directions.
 
 ---
 
-## 6. Weight velocity and acceleration
+### 7. Gradient covariance / Fisher proxy
 
-If we view training as a trajectory through weight space, then the finite-difference velocity is:
+The true Fisher matrix is:
+
+```math
+F =
+\mathbb{E}
+\left[
+\nabla_\theta \log p_\theta(y|x)
+\nabla_\theta \log p_\theta(y|x)^\top
+\right]
+```
+
+The full empirical Fisher is too expensive for this small notebook lab.
+
+Instead, the notebook uses a cheap layer-level proxy based on the current matrix gradient:
+
+```math
+GG^\top
+\quad \text{or} \quad
+G^\top G
+```
+
+Tracked quantities include:
+
+- trace proxy,
+- largest eigenvalue proxy,
+- effective rank proxy,
+- top-k gradient-energy ratio.
+
+This is not a full Fisher estimate.
+
+It is only a compact diagnostic for gradient anisotropy and update concentration.
+
+---
+
+### 8. Weight velocity and acceleration
+
+At diagnostic checkpoints, the finite-difference velocity is:
 
 ```math
 v_t = W_t - W_{t-\Delta}
 ```
 
-and the finite-difference acceleration is:
+and acceleration is:
 
 ```math
 a_t = v_t - v_{t-\Delta}
 ```
 
-These are not physical velocity and acceleration, but they are useful trajectory diagnostics.
+Tracked quantities include:
 
-The notebook tracks:
+- velocity Frobenius norm,
+- velocity spectral norm,
+- acceleration Frobenius norm,
+- relative acceleration,
+- velocity cosine similarity.
 
-- velocity Frobenius norm
-- velocity spectral norm
-- acceleration Frobenius norm
-- relative acceleration
-- velocity cosine similarity
+These metrics describe whether optimizer trajectories are smooth, abrupt, or oscillatory in weight space.
 
-Interpretation:
-
-- high velocity norm: large movement in weight space
-- high acceleration: rapidly changing update direction or magnitude
-- high velocity cosine: smooth trajectory
-- low or negative velocity cosine: oscillatory or turning behavior
-
-These metrics help distinguish optimizers that produce smooth geometric evolution from those that produce sharper turns or more abrupt spectral changes.
+They are not physical velocities. They are just finite-difference trajectory diagnostics.
 
 ---
 
-## 7. AdamW vs Muon: what should we expect?
+## Suggested interpretation
 
-This project is not meant to prove that one optimizer is universally better. Instead, it is designed to reveal that different optimizers can induce different internal geometries.
+Use cautious language.
 
-Possible observations:
-
-- AdamW may concentrate energy into fewer dominant directions.
-- Muon may produce different norm growth and effective-rank behavior.
-- Both optimizers may reach similar validation loss while producing different spectra.
-- Differences may appear more clearly in stable rank, subspace drift, and gradient-covariance proxies than in loss alone.
-
-The main message is:
-
-> Similar external performance does not imply similar internal training dynamics.
+| Avoid saying | Prefer saying |
+|---|---|
+| Muon learns better geometry | Muon produced different spectral diagnostics in this run |
+| stable rank proves better representations | stable rank indicates broader or narrower spectral energy |
+| subspace drift means feature discovery | top-k singular subspace changed between checkpoints |
+| Fisher proxy | gradient-covariance proxy |
+| optimizer X is better | optimizer X had lower loss or different diagnostics under this setup |
+| this explains LLM training | this provides a small-scale diagnostic view |
 
 ---
 
-## 8. Limitations
+## Minimal run
 
-These diagnostics should be interpreted carefully.
+Install requirements:
 
-- The Fisher proxy is not the full empirical Fisher.
-- Weight-space metrics are affected by parameterization and normalization layers.
-- Small models may not reproduce all dynamics of large LLMs.
-- Word-level tokenization is intentionally simple and educational, not state-of-the-art.
-- SVD-based diagnostics can be expensive for larger matrices.
-- Weight geometry and activation geometry are related but not identical.
+```bash
+pip install torch datasets transformers matplotlib pandas numpy tqdm
+```
 
-The notebook is therefore best understood as an educational observatory, not as a complete theory of Transformer training.
+Open the notebook:
 
----
+```bash
+jupyter notebook tiny_qwen_wikitext2_matrix_diagnostics_adamw_muon_enhanced_dynamics_fixed.ipynb
+```
 
-## 9. Suggested future extensions
+Run all cells.
 
-Potential directions:
+You can change:
 
-- exact per-sample empirical Fisher blocks for selected matrices
-- Hessian-vector product diagnostics
-- Lanczos estimates of Hessian/Fisher spectra
-- activation CKA between checkpoints
-- layerwise comparison across attention and FFN blocks
-- LoRA-specific spectral dynamics
-- quantization-aware spectral diagnostics
-- optimizer-state diagnostics for Adam moments and Muon updates
-- comparison with SGD, Lion, Adafactor, Sophia, and Shampoo
+- optimizer,
+- learning rate,
+- batch size,
+- model size,
+- number of training steps,
+- diagnostic interval,
+- tracked matrix name patterns,
+- top-k singular directions.
 
 ---
 
-## Additional references
+## Recommended experiment protocol
 
-- Amari, S. (1998). Natural gradient works efficiently in learning.
-- Martens, J. and Grosse, R. (2015). Optimizing Neural Networks with Kronecker-factored Approximate Curvature.
-- Raghu, M. et al. (2017). SVCCA: Singular Vector Canonical Correlation Analysis for Deep Learning Dynamics and Interpretability.
-- Morcos, A. et al. (2018). Insights on Representational Similarity in Neural Networks with Canonical Correlation.
-- Kornblith, S. et al. (2019). Similarity of Neural Network Representations Revisited.
-- Martin, C. H. and Mahoney, M. W. (2019). Traditional and Heavy-Tailed Self Regularization in Neural Network Models.
-- Martens, J. (2020). New insights and perspectives on the natural gradient method.
+For a cleaner AdamW-vs-Muon comparison:
+
+1. Fix model architecture.
+2. Fix dataset and tokenizer.
+3. Fix seed.
+4. Fix batch size and training schedule.
+5. Tune AdamW and Muon learning rates separately enough to avoid unfair defaults.
+6. Run both optimizers.
+7. Compare loss curves first.
+8. Compare spectral diagnostics only after confirming both runs are valid.
+9. Repeat over multiple seeds if making claims.
+
+A minimal results table should include:
+
+| Optimizer | Seed | Final train loss | Final val loss | Mean stable rank | Mean top-k energy | Mean subspace drift |
+|---|---:|---:|---:|---:|---:|---:|
+| AdamW | 1 | TBD | TBD | TBD | TBD | TBD |
+| Muon | 1 | TBD | TBD | TBD | TBD | TBD |
+
+For stronger claims, report mean and standard deviation across seeds.
+
+---
+
+## How to read the CSV outputs
+
+### `loss_curves_adamw_vs_muon.csv`
+
+This file stores scalar optimization metrics over training.
+
+Typical columns may include:
+
+- optimizer,
+- step,
+- train loss,
+- validation loss,
+- perplexity.
+
+Use this file to check whether a run is healthy before interpreting geometry.
+
+### `matrix_diagnostics_adamw_vs_muon.csv`
+
+This file stores matrix-level diagnostics over checkpoints.
+
+Typical columns may include:
+
+- optimizer,
+- step,
+- module name,
+- Frobenius norm,
+- spectral norm,
+- stable rank,
+- top-k energy,
+- subspace alignment,
+- gradient projection ratio,
+- gradient covariance proxy metrics,
+- velocity and acceleration metrics.
+
+Use this file to compare optimizer-induced matrix dynamics layer by layer.
+
+---
+
+## What would make the project stronger?
+
+### Multi-seed runs
+
+Single-run differences are interesting but fragile.
+
+The next step is to run the same configuration across multiple seeds and report averages.
+
+### Better optimizer tuning
+
+AdamW and Muon may require different learning rates and weight decay settings.
+
+A fair comparison should not assume that identical hyperparameters are optimal for both.
+
+### End-of-schedule evaluation
+
+Optimizer rankings can change over the full learning-rate schedule.
+
+Do not overinterpret early curves unless the experiment is explicitly about early training.
+
+### Activation-side diagnostics
+
+Weight spectra are useful, but weight geometry and activation geometry are not identical.
+
+Adding activation CKA, SVCCA, or token-level activation spectra would make the comparison more complete.
+
+### Larger models
+
+The tiny model makes diagnostics cheap, but larger models are needed before making broader claims.
+
+### Cleaner command-line runner
+
+The project would become more reproducible if the notebook were backed by a small CLI:
+
+```bash
+python train_observatory.py --optimizer adamw --seed 1 --run-name adamw_seed1
+python train_observatory.py --optimizer muon --seed 1 --run-name muon_seed1
+
+python compare_runs.py \
+  --run-a runs/adamw_seed1 \
+  --run-b runs/muon_seed1 \
+  --metrics loss stable_rank topk_energy subspace_drift grad_projection
+```
+
+The notebook can remain the readable educational entry point.
+
+The CLI would make repeated experiments easier.
+
+---
+
+## Limitations
+
+- The model is intentionally tiny.
+- WikiText-2 is small and not representative of modern pretraining.
+- The tokenizer is intentionally simple.
+- Weight-space metrics are affected by parameterization and normalization.
+- SVD diagnostics can become expensive for larger matrices.
+- The gradient covariance proxy is not a full Fisher matrix.
+- Similar spectral diagnostics do not imply similar model behavior.
+- Different spectral diagnostics do not automatically imply better or worse behavior.
+- Single-seed results should be treated as examples, not evidence.
+
+---
+
+## References and related ideas
+
+This project is related to:
+
+- AdamW optimization,
+- Muon and matrix-aware optimization,
+- singular-value diagnostics,
+- stable rank and effective rank,
+- SVCCA and CKA-style representation comparison,
+- natural gradient and Fisher geometry,
+- K-FAC and curvature-aware optimization,
+- empirical spectral analysis of neural-network weights.
+
+These ideas are used here as practical diagnostics, not as proof of a complete theory.
+
+---
+
+## Scope statement
+
+This repository is best understood as a small educational observatory for optimizer-induced matrix dynamics.
+
+It is useful if you want to inspect what changes inside Transformer weight matrices when training with AdamW versus Muon.
+
+It is not useful as evidence that one optimizer is universally better unless the experiments are extended with proper hyperparameter tuning, multiple seeds, larger models, and task-level evaluation.
+
+The core value is reproducibility and visibility:
+
+> Put more instruments on a tiny Transformer training run, then compare what AdamW and Muon do inside the matrices.
+
